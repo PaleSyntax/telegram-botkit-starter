@@ -30,8 +30,12 @@ class Bot:
         command = message.text.strip().split(maxsplit=1)[0].split("@", 1)[0] if message.text.strip() else ""
         if command == "/start":
             return _reply_text(self.settings.start_message)
-        answer = self.plugin.on_text(message)
-        return _reply_text(answer if answer is not None else self.settings.fallback_message)
+        try:
+            answer = self.plugin.on_text(message)
+            return _reply_text(answer if answer is not None else self.settings.fallback_message)
+        except Exception:
+            # A faulty plugin or oversized reply must not stop the polling loop.
+            return _reply_text(self.settings.fallback_message)
 
 
 def incoming_from_update(update: Mapping) -> Incoming | None:

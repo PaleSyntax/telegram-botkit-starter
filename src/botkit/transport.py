@@ -13,6 +13,10 @@ class BotApiError(RuntimeError):
     """A sanitized Telegram API failure (never contains a bot token)."""
 
 
+_MAX_RESPONSE_BYTES = 4_000_000
+_POLL_BATCH_SIZE = 10
+
+
 @dataclass
 class FakeTransport:
     updates: list[dict] = field(default_factory=list)
@@ -45,8 +49,8 @@ class TelegramTransport:
         )
         try:
             with self._opener(req, timeout=timeout) as response:
-                raw = response.read(1_000_001)
-            if len(raw) > 1_000_000:
+                raw = response.read(_MAX_RESPONSE_BYTES + 1)
+            if len(raw) > _MAX_RESPONSE_BYTES:
                 raise BotApiError(f"{method}: response is too large")
             result = json.loads(raw)
         except Exception:
@@ -56,7 +60,7 @@ class TelegramTransport:
         return result.get("result")
 
     def receive(self, offset: int | None, timeout: int) -> list[dict]:
-        payload: dict = {"timeout": timeout, "allowed_updates": ["message"]}
+        payload: dict = {"timeout": timeout, "limit": _POLL_BATCH_SIZE, "allowed_updates": ["message"]}
         if offset is not None:
             payload["offset"] = offset
         result = self._call("getUpdates", payload, timeout + 10)

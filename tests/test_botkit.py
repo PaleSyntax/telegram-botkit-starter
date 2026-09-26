@@ -46,6 +46,36 @@ class GeneratedBotTests(unittest.TestCase):
             self.assertIn("plugin.py", reply)
             self.assertIn("Пришлите ссылку", bot.reply(Incoming(1, 1, "https://youtube.com.evil.example/watch")))
 
+    def test_long_echo_reply_uses_fallback_and_continues(self):
+        with tempfile.TemporaryDirectory() as temp:
+            folder = create_bot("mybot", Path(temp))
+            config = folder / "bot.toml"
+            settings = load_settings(config)
+            fake = FakeTransport([
+                {"update_id": 1, "message": {"chat": {"id": 7}, "text": "x" * 4096}},
+                {"update_id": 2, "message": {"chat": {"id": 7}, "text": "ok"}},
+            ])
+            runner = Runner(Bot(settings, load_plugin(config, settings)), fake)
+            self.assertEqual(runner.step(), 3)
+            self.assertEqual(fake.sent, [
+                (7, settings.fallback_message),
+                (7, "Вы написали: ok"),
+            ])
+
+    def test_malformed_url_uses_fallback_and_continues(self):
+        with tempfile.TemporaryDirectory() as temp:
+            folder = create_bot("links", Path(temp), template="tt-links")
+            config = folder / "bot.toml"
+            settings = load_settings(config)
+            fake = FakeTransport([
+                {"update_id": 1, "message": {"chat": {"id": 7}, "text": "https://["}},
+                {"update_id": 2, "message": {"chat": {"id": 7}, "text": "https://youtu.be/example"}},
+            ])
+            runner = Runner(Bot(settings, load_plugin(config, settings)), fake)
+            self.assertEqual(runner.step(), 3)
+            self.assertEqual(fake.sent[0], (7, settings.fallback_message))
+            self.assertIn("Демо: ссылка распознана", fake.sent[1][1])
+
     def test_generator_never_overwrites_existing_folder(self):
         with tempfile.TemporaryDirectory() as temp:
             folder = create_bot("mybot", Path(temp))
@@ -67,6 +97,25 @@ class GeneratedBotTests(unittest.TestCase):
                 with self.assertRaises(ConfigError) as captured:
                     load_token(config, "BOT_TOKEN")
             self.assertNotIn("put_your_own_token_here", str(captured.exception))
+
+    def test_start_and_fallback_message_limits(self):
+        with tempfile.TemporaryDirectory() as temp:
+            folder = create_bot("mybot", Path(temp))
+            config = folder / "bot.toml"
+            original = config.read_text(encoding="utf-8")
+            for key in ("start_message", "fallback_message"):
+                original_line = next(line for line in original.splitlines() if line.startswith(key + " = "))
+                for length in (4096, 4097):
+                    with self.subTest(key=key, length=length):
+                        config.write_text(
+                            original.replace(original_line, f'{key} = "{"x" * length}"'),
+                            encoding="utf-8",
+                        )
+                        if length == 4096:
+                            self.assertEqual(len(getattr(load_settings(config), key)), 4096)
+                        else:
+                            with self.assertRaises(ConfigError):
+                                load_settings(config)
 
     def test_failed_send_keeps_update_for_retry(self):
         with tempfile.TemporaryDirectory() as temp:
@@ -140,8 +189,64 @@ class TelegramAdapterTests(unittest.TestCase):
         transport = TelegramTransport("synthetic-token", opener=opener)
         self.assertEqual(transport.receive(12, 25), [])
         transport.send(9, "hello")
-        self.assertEqual(calls[0], ("getUpdates", {"timeout": 25, "allowed_updates": ["message"], "offset": 12}, 35))
+        self.assertEqual(calls[0], ("getUpdates", {"timeout": 25, "limit": 10, "allowed_updates": ["message"], "offset": 12}, 35))
         self.assertEqual(calls[1], ("sendMessage", {"chat_id": 9, "text": "hello"}, 15))
+
+    def test_large_pending_queue_is_polled_in_bounded_batches(self):
+        updates = [
+            {"update_id": index, "message": {"chat": {"id": 7}, "text": "😀" * 3000}}
+            for index in range(1, 101)
+        ]
+        self.assertGreater(len(json.dumps({"ok": True, "result": updates}, ensure_ascii=False).encode("utf-8")), 1_000_000)
+        polls = []
+        sent = []
+
+        class Response:
+            def __init__(self, result):
+                self.data = json.dumps({"ok": True, "result": result}, ensure_ascii=False).encode("utf-8")
+            def __enter__(self):
+                return self
+            def __exit__(self, *args):
+                return False
+            def read(self, size):
+                return self.data[:size]
+
+        def opener(req, timeout):
+            del timeout
+            payload = json.loads(req.data)
+            if req.full_url.endswith("/getUpdates"):
+                polls.append(payload)
+                offset = payload.get("offset", 1)
+                batch = [item for item in updates if item["update_id"] >= offset][:payload["limit"]]
+                return Response(batch)
+            sent.append(payload)
+            return Response({"message_id": len(sent)})
+
+        with tempfile.TemporaryDirectory() as temp:
+            folder = create_bot("mybot", Path(temp))
+            config = folder / "bot.toml"
+            settings = load_settings(config)
+            runner = Runner(Bot(settings, load_plugin(config, settings)), TelegramTransport("synthetic-token", opener=opener))
+            for _ in range(10):
+                runner.step()
+        self.assertEqual(runner.offset, 101)
+        self.assertEqual(len(sent), 100)
+        self.assertEqual(len(polls), 10)
+        self.assertTrue(all(poll["limit"] == 10 for poll in polls))
+
+    def test_transport_accepts_response_above_old_one_megabyte_cap(self):
+        large_response = json.dumps({"ok": True, "result": [{"update_id": 1, "padding": "x" * 1_100_000}]}).encode("utf-8")
+
+        class Response:
+            def __enter__(self):
+                return self
+            def __exit__(self, *args):
+                return False
+            def read(self, size):
+                return large_response[:size]
+
+        transport = TelegramTransport("synthetic-token", opener=lambda req, timeout: Response())
+        self.assertEqual(transport.receive(None, 25)[0]["update_id"], 1)
 
     def test_network_exception_does_not_expose_token(self):
         def failed(req, timeout):

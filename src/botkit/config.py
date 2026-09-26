@@ -43,6 +43,13 @@ def _nonempty(table: dict, key: str) -> str:
     return value
 
 
+def _reply_setting(table: dict, key: str) -> str:
+    value = _nonempty(table, key)
+    if len(value) > 4096:
+        raise ConfigError(f"{key} must not exceed 4096 characters")
+    return value
+
+
 def load_settings(path: Path) -> BotSettings:
     path = Path(path)
     try:
@@ -65,8 +72,8 @@ def load_settings(path: Path) -> BotSettings:
         raise ConfigError("[telegram].poll_timeout must be an integer from 1 to 50")
     return BotSettings(
         name=_nonempty(bot, "name"),
-        start_message=_nonempty(bot, "start_message"),
-        fallback_message=_nonempty(bot, "fallback_message"),
+        start_message=_reply_setting(bot, "start_message"),
+        fallback_message=_reply_setting(bot, "fallback_message"),
         plugin_file=plugin_file,
         token_env=token_env,
         poll_timeout=timeout,
