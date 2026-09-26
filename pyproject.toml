@@ -1,0 +1,18 @@
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "telegram-botkit-starter"
+version = "0.1.0"
+description = "A small, configurable Telegram bot starter with an offline demo"
+readme = "README.md"
+requires-python = ">=3.11"
+license = "MIT"
+dependencies = []
+
+[project.scripts]
+botkit = "botkit.cli:main"
+
+[tool.setuptools.packages.find]
+where = ["src"]
