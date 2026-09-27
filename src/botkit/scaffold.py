@@ -20,28 +20,36 @@ class Plugin:
         return f"Вы написали: {message.text}"
 '''
 
-TT_LINKS_PLUGIN = '''from urllib.parse import urlparse
+TASK_PLUGIN = '''from pathlib import Path
+from botkit.tasks import TaskPlugin
 
-from botkit.config import Incoming
+
+class Plugin(TaskPlugin):
+    def __init__(self):
+        super().__init__(Path(__file__).parent / "data" / "jobs.sqlite3")
+'''
+
+TASK_HANDLER = '''from botkit.config import Incoming
 
 
 class Plugin:
-    def on_text(self, message: Incoming) -> str | None:
-        url = urlparse(message.text.strip())
-        host = (url.hostname or "").lower()
-        domains = ("tiktok.com", "youtube.com", "youtu.be")
-        known = any(host == domain or host.endswith("." + domain) for domain in domains)
-        if url.scheme == "https" and known:
-            return ("Демо: ссылка распознана. Загрузка видео, распознавание речи "
-                    "и анализ здесь не выполняются. Подключите обработчик в plugin.py.")
-        return "Пришлите ссылку TikTok или YouTube. Это демонстрационный шаблон."
+    def on_text(self, message: Incoming) -> str:
+        # Example business logic: one line becomes one checklist item.
+        # Replace this method with your own integration or processing.
+        items = [line.strip().lstrip("-* ") for line in message.text.splitlines() if line.strip().lstrip("-* ")]
+        if not items:
+            return "Список пуст. Напишите по одному пункту на строку."
+        if len(items) > 30:
+            return "В примере поддерживается до 30 пунктов."
+        result = "Чек-лист:\\n" + "\\n".join(f"☐ {item}" for item in items)
+        return result if len(result) <= 4096 else "Список слишком длинный. Разделите его на несколько задач."
 '''
 
 
 def create_bot(name: str, destination: Path, template: str = "echo") -> Path:
     if not re.fullmatch(r"[a-z][a-z0-9_]{0,39}", name):
         raise ScaffoldError("Bot name must use lowercase Latin letters, digits or underscore")
-    if template not in {"echo", "tt-links"}:
+    if template not in {"echo", "tasks"}:
         raise ScaffoldError("Unknown template")
     target = Path(destination) / name
     if target.exists():
@@ -50,7 +58,7 @@ def create_bot(name: str, destination: Path, template: str = "echo") -> Path:
     start = (
         "Привет! Пришлите текст."
         if template == "echo"
-        else "Привет! Пришлите ссылку TikTok или YouTube. Это демо без обработки видео."
+        else "Пришлите пункты по одному на строку — обработчик соберёт чек-лист. Команды: /help."
     )
     lines = [
         "[bot]",
@@ -58,6 +66,7 @@ def create_bot(name: str, destination: Path, template: str = "echo") -> Path:
         f"start_message = {json.dumps(start, ensure_ascii=False)}",
         'fallback_message = "Не удалось обработать сообщение."',
         'plugin = "plugin.py"',
+        'allowed_users = []',
         "",
         "[telegram]",
         'token_env = "BOT_TOKEN"',
@@ -66,20 +75,30 @@ def create_bot(name: str, destination: Path, template: str = "echo") -> Path:
     ]
     (target / "bot.toml").write_text("\n".join(lines), encoding="utf-8")
     (target / "plugin.py").write_text(
-        ECHO_PLUGIN if template == "echo" else TT_LINKS_PLUGIN, encoding="utf-8"
+        ECHO_PLUGIN if template == "echo" else TASK_PLUGIN, encoding="utf-8"
     )
+    if template == "tasks":
+        (target / "task.py").write_text(TASK_HANDLER, encoding="utf-8")
     (target / ".env.example").write_text("BOT_TOKEN=put_your_own_token_here\n", encoding="utf-8")
-    (target / ".gitignore").write_text(".env\n__pycache__/\n*.offset\n", encoding="utf-8")
+    (target / ".gitignore").write_text(".env\n__pycache__/\ndata/\n*.offset\n", encoding="utf-8")
     (target / "README.md").write_text(
         "# " + name + "\n\n"
         "Для запуска нужен установленный BotKit. Используйте Python из среды, куда он установлен; "
         "одной этой папки на другом компьютере недостаточно.\n\n"
         "1. Проверьте ответы в `python -m botkit demo --config bot.toml`.\n"
-        "2. Настройте `bot.toml`; для своей логики измените `Plugin.on_text` в `plugin.py`.\n"
+        "2. Настройте `bot.toml`; свою логику задайте в обработчике выбранного шаблона.\n"
         "3. Для Telegram создайте бота у BotFather, скопируйте `.env.example` в `.env`, "
         "замените заглушку своим токеном и запустите `python -m botkit run --config bot.toml`.\n"
         "Не публикуйте `.env` и не вставляйте токен в запрос ИИ. "
         "Пользовательский `plugin.py` выполняется и в деморежиме: он может обращаться к сети и файлам.\n",
         encoding="utf-8",
     )
+    if template == "tasks":
+        with (target / "README.md").open("a", encoding="utf-8") as handle:
+            handle.write(
+                "\nЛогику задачи меняйте в `task.py`. Запустите worker во втором терминале: "
+                "`python -m botkit worker --config bot.toml`. Для одной задачи добавьте `--once`. "
+                "Проверяйте результат командой `/status <номер>` в боте. "
+                "Задания и результаты находятся в `data/jobs.sqlite3`; храните эту папку приватно.\n"
+            )
     return target

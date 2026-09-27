@@ -35,16 +35,16 @@ class GeneratedBotTests(unittest.TestCase):
             self.assertEqual(runner.step(), 13)
             self.assertEqual(len(fake.sent), 2)
 
-    def test_tt_links_is_an_explicit_stub(self):
+    def test_tasks_template_enqueues_and_rejects_unknown_commands(self):
         with tempfile.TemporaryDirectory() as temp:
-            folder = create_bot("links", Path(temp), template="tt-links")
+            folder = create_bot("tasks", Path(temp), template="tasks")
             config = folder / "bot.toml"
             settings = load_settings(config)
             bot = Bot(settings, load_plugin(config, settings))
-            reply = bot.reply(Incoming(1, 1, "https://youtu.be/example"))
-            self.assertIn("не выполняются", reply)
-            self.assertIn("plugin.py", reply)
-            self.assertIn("Пришлите ссылку", bot.reply(Incoming(1, 1, "https://youtube.com.evil.example/watch")))
+            reply = bot.reply(Incoming(1, 1, "Prepare a checklist"))
+            self.assertIn("сохранена", reply)
+            self.assertIn("/status", reply)
+            self.assertIn("/help", bot.reply(Incoming(1, 1, "/unknown")))
 
     def test_long_echo_reply_uses_fallback_and_continues(self):
         with tempfile.TemporaryDirectory() as temp:
@@ -62,19 +62,24 @@ class GeneratedBotTests(unittest.TestCase):
                 (7, "Вы написали: ok"),
             ])
 
-    def test_malformed_url_uses_fallback_and_continues(self):
+    def test_handler_exception_uses_fallback_and_continues(self):
         with tempfile.TemporaryDirectory() as temp:
-            folder = create_bot("links", Path(temp), template="tt-links")
+            folder = create_bot("sample", Path(temp))
             config = folder / "bot.toml"
             settings = load_settings(config)
             fake = FakeTransport([
-                {"update_id": 1, "message": {"chat": {"id": 7}, "text": "https://["}},
-                {"update_id": 2, "message": {"chat": {"id": 7}, "text": "https://youtu.be/example"}},
+                {"update_id": 1, "message": {"chat": {"id": 7}, "text": "fail"}},
+                {"update_id": 2, "message": {"chat": {"id": 7}, "text": "ok"}},
             ])
-            runner = Runner(Bot(settings, load_plugin(config, settings)), fake)
+            class Handler:
+                def on_text(self, message):
+                    if message.text == "fail":
+                        raise ValueError("private exception details")
+                    return "ok"
+            runner = Runner(Bot(settings, Handler()), fake)
             self.assertEqual(runner.step(), 3)
             self.assertEqual(fake.sent[0], (7, settings.fallback_message))
-            self.assertIn("Демо: ссылка распознана", fake.sent[1][1])
+            self.assertEqual("ok", fake.sent[1][1])
 
     def test_generator_never_overwrites_existing_folder(self):
         with tempfile.TemporaryDirectory() as temp:

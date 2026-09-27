@@ -6,6 +6,7 @@ from dataclasses import dataclass
 from typing import Mapping, Protocol
 
 from botkit.config import BotSettings, Incoming, TextPlugin
+from botkit.state import CursorStore
 
 
 class Transport(Protocol):
@@ -13,7 +14,7 @@ class Transport(Protocol):
     def send(self, chat_id: int, text: str) -> None: ...
 
 
-def _reply_text(value: str) -> str:
+def validate_reply(value: str) -> str:
     if not isinstance(value, str) or not value:
         raise ValueError("Plugin reply must be a nonempty string")
     if len(value) > 4096:
@@ -27,15 +28,17 @@ class Bot:
     plugin: TextPlugin
 
     def reply(self, message: Incoming) -> str:
+        if self.settings.allowed_users and message.user_id not in self.settings.allowed_users:
+            return "Доступ к этому боту ограничен владельцем."
         command = message.text.strip().split(maxsplit=1)[0].split("@", 1)[0] if message.text.strip() else ""
         if command == "/start":
-            return _reply_text(self.settings.start_message)
+            return validate_reply(self.settings.start_message)
         try:
             answer = self.plugin.on_text(message)
-            return _reply_text(answer if answer is not None else self.settings.fallback_message)
+            return validate_reply(answer if answer is not None else self.settings.fallback_message)
         except Exception:
             # A faulty plugin or oversized reply must not stop the polling loop.
-            return _reply_text(self.settings.fallback_message)
+            return validate_reply(self.settings.fallback_message)
 
 
 def incoming_from_update(update: Mapping) -> Incoming | None:
@@ -53,7 +56,7 @@ def incoming_from_update(update: Mapping) -> Incoming | None:
     user_id = sender.get("id") if isinstance(sender, dict) else None
     if isinstance(user_id, bool) or not isinstance(user_id, int):
         user_id = None
-    return Incoming(chat_id=chat_id, user_id=user_id, text=text)
+    return Incoming(chat_id=chat_id, user_id=user_id, text=text, update_id=update.get("update_id"))
 
 
 @dataclass
@@ -61,6 +64,11 @@ class Runner:
     bot: Bot
     transport: Transport
     offset: int | None = None
+    state: CursorStore | None = None
+
+    def __post_init__(self):
+        if self.state is not None:
+            self.offset = self.state.load()
 
     def step(self) -> int | None:
         """Process one poll. A failed send leaves the update unconfirmed for retry."""
@@ -74,5 +82,8 @@ class Runner:
             message = incoming_from_update(update)
             if message is not None:
                 self.transport.send(message.chat_id, self.bot.reply(message))
-            self.offset = update_id + 1
+            next_offset = update_id + 1
+            if self.state is not None:
+                self.state.save(next_offset)
+            self.offset = next_offset
         return self.offset

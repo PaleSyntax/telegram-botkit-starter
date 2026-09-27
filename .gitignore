@@ -8,3 +8,6 @@ build/
 dist/
 .env
 *.offset
+data/
+*.sqlite3
+*.sqlite3-*

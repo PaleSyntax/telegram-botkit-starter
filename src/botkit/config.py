@@ -24,6 +24,7 @@ class Incoming:
     chat_id: int
     user_id: int | None
     text: str
+    update_id: int | None = None
 
 
 @dataclass(frozen=True)
@@ -34,6 +35,7 @@ class BotSettings:
     plugin_file: str
     token_env: str
     poll_timeout: int
+    allowed_users: tuple[int, ...] = ()
 
 
 def _nonempty(table: dict, key: str) -> str:
@@ -70,6 +72,9 @@ def load_settings(path: Path) -> BotSettings:
     timeout = telegram.get("poll_timeout", 25)
     if isinstance(timeout, bool) or not isinstance(timeout, int) or not 1 <= timeout <= 50:
         raise ConfigError("[telegram].poll_timeout must be an integer from 1 to 50")
+    allowed = bot.get("allowed_users", [])
+    if not isinstance(allowed, list) or any(type(value) is not int or value <= 0 for value in allowed):
+        raise ConfigError("[bot].allowed_users must be a list of positive integer user IDs")
     return BotSettings(
         name=_nonempty(bot, "name"),
         start_message=_reply_setting(bot, "start_message"),
@@ -77,6 +82,7 @@ def load_settings(path: Path) -> BotSettings:
         plugin_file=plugin_file,
         token_env=token_env,
         poll_timeout=timeout,
+        allowed_users=tuple(allowed),
     )
 
 
