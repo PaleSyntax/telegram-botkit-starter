@@ -72,11 +72,14 @@ def create_bot(name: str, destination: Path, template: str = "echo") -> Path:
     (target / ".gitignore").write_text(".env\n__pycache__/\n*.offset\n", encoding="utf-8")
     (target / "README.md").write_text(
         "# " + name + "\n\n"
-        "1. Проверьте ответы в `botkit demo --config bot.toml`.\n"
+        "Для запуска нужен установленный BotKit. Используйте Python из среды, куда он установлен; "
+        "одной этой папки на другом компьютере недостаточно.\n\n"
+        "1. Проверьте ответы в `python -m botkit demo --config bot.toml`.\n"
         "2. Настройте `bot.toml`; для своей логики измените `Plugin.on_text` в `plugin.py`.\n"
         "3. Для Telegram создайте бота у BotFather, скопируйте `.env.example` в `.env`, "
-        "замените заглушку своим токеном и запустите `botkit run --config bot.toml`.\n"
-        "Не публикуйте `.env` и не вставляйте токен в запрос ИИ.\n",
+        "замените заглушку своим токеном и запустите `python -m botkit run --config bot.toml`.\n"
+        "Не публикуйте `.env` и не вставляйте токен в запрос ИИ. "
+        "Пользовательский `plugin.py` выполняется и в деморежиме: он может обращаться к сети и файлам.\n",
         encoding="utf-8",
     )
     return target

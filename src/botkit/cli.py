@@ -25,7 +25,7 @@ def _parser() -> argparse.ArgumentParser:
     new.add_argument("name")
     new.add_argument("--dest", type=Path, default=Path.cwd())
     new.add_argument("--template", choices=("echo", "tt-links"), default="echo")
-    demo = sub.add_parser("demo", help="Run without network or a Telegram token")
+    demo = sub.add_parser("demo", help="Use a local fake transport; custom plugins may access the network")
     demo.add_argument("--config", type=Path, required=True)
     demo.add_argument("--text", action="append", default=[])
     run = sub.add_parser("run", help="Use Telegram Bot API long polling")

@@ -5,7 +5,7 @@ build-backend = "setuptools.build_meta"
 [project]
 name = "telegram-botkit-starter"
 version = "0.1.0"
-description = "A small, configurable Telegram bot starter with an offline demo"
+description = "A minimal text Telegram bot starter with a local fake-transport demo"
 readme = "README.md"
 requires-python = ">=3.11"
 license = "MIT"
